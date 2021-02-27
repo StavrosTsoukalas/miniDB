@@ -6,6 +6,8 @@ import os
 from btree import Btree
 import shutil
 from misc import split_condition
+import log
+import datetime
 
 class Database:
     '''
@@ -13,8 +15,10 @@ class Database:
     '''
 
     def __init__(self, name, load=True):
+        x = datetime.datetime.now()
         self.tables = {}
         self._name = name
+
 
         self.savedir = f'dbdata/{name}_db'
 
@@ -35,14 +39,17 @@ class Database:
             os.mkdir(self.savedir)
         except:
             pass
-
+        
+        f = open("log_data.txt", "a")
+        f.write("database_creation,"+str(name)+"\n")
+        f.close()
         # create all the meta tables
         self.create_table('meta_length',  ['table_name', 'no_of_rows'], [str, int])
         self.create_table('meta_locks',  ['table_name', 'locked'], [str, bool])
         self.create_table('meta_insert_stack',  ['table_name', 'indexes'], [str, list])
         self.create_table('meta_indexes',  ['table_name', 'index_name'], [str, str])
         self.save()
-
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: database_creation "+"DATABASE: "+str(name))
 
 
     def save(self):
@@ -76,7 +83,12 @@ class Database:
             setattr(self, name, self.tables[name])
 
     def drop_db(self):
+        x = datetime.datetime.now()
         shutil.rmtree(self.savedir)
+        f = open("log_data.txt", "a")
+        f.write("database_drop,"+str(self._name)+"\n")
+        f.close()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: database_drop "+"DATABASE: "+str(self._name))
 
     #### IO ####
 
@@ -96,6 +108,7 @@ class Database:
         or
         db_object.table_name
         '''
+        x = datetime.datetime.now()
         self.tables.update({name: Table(name=name, column_names=column_names, column_types=column_types, primary_key=primary_key, load=load)})
         # self._name = Table(name=name, column_names=column_names, column_types=column_types, load=load)
         # check that new dynamic var doesnt exist already
@@ -107,15 +120,27 @@ class Database:
         print(f'New table "{name}"')
         self._update()
         self.save()
+        if str(name)!="meta_length" and str(name)!="meta_locks" and str(name)!="meta_insert_stack" and str(name)!="meta_indexes":
+            f = open("log_data.txt", "a")
+            f.write("table_creation,"+str(self._name)+","+str(name)+"\n")
+            f.close()
+            log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: table_creation "+"DATABASE: "+str(self._name)+" TABLE: "+str(name))
 
 
-    def drop_table(self, table_name):
+    def drop_table(self, table_name,flag=True):
+        x = datetime.datetime.now()
+        if flag:
+            log.Log.save_old_table(self,table_name)
         '''
         Drop table with name 'table_name' from current db
         '''
+        
         self.load(self.savedir)
+        
         if self.is_locked(table_name):
             return
+        
+        
 
         self.tables.pop(table_name)
         delattr(self, table_name)
@@ -129,6 +154,7 @@ class Database:
 
         # self._update()
         self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: table_drop "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name))
 
 
     def table_from_csv(self, filename, name=None, column_types=None, primary_key=None):
@@ -137,6 +163,7 @@ class Database:
         If name is not specified, filename's name is used
         If column types are not specified, all are regarded to be of type str
         '''
+        x = datetime.datetime.now()
         if name is None:
             name=filename.split('.')[:-1][0]
 
@@ -158,9 +185,14 @@ class Database:
         self.unlock_table(name)
         self._update()
         self.save()
+        f = open("log_data.txt", "a")
+        f.write("table_creation_from_csv,"+str(self._name)+","+str(name)+"\n")
+        f.close()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: table_creation "+"DATABASE: "+str(self._name)+" TABLE: "+str(name))
 
 
     def table_to_csv(self, table_name, filename=None):
+        x = datetime.datetime.now()
         res = ''
         for row in [self.tables[table_name].column_names]+self.tables[table_name].data:
             res+=str(row)[1:-1].replace('\'', '').replace('"','').replace(' ','')+'\n'
@@ -170,12 +202,13 @@ class Database:
 
         with open(filename, 'w') as file:
            file.write(res)
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: save_table_to_csv "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name))
 
     def table_from_object(self, new_table):
         '''
         Add table obj to database.
         '''
-
+        x = datetime.datetime.now()
         self.tables.update({new_table._name: new_table})
         if new_table._name not in self.__dir__():
             setattr(self, new_table._name, new_table)
@@ -183,6 +216,7 @@ class Database:
             raise Exception(f'"{new_table._name}" attribute already exists in class "{self.__class__.__name__}".')
         self._update()
         self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: table_creation "+"DATABASE: "+str(self._name)+" TABLE: "+str(new_table._name))
 
 
 
@@ -197,6 +231,8 @@ class Database:
     # these function calls are named close to the ones in postgres
 
     def cast_column(self, table_name, column_name, cast_type):
+        x = datetime.datetime.now()
+        log.Log.save_old_table(self,table_name)
         '''
         Change the type of the specified column and cast all the prexisting values.
         Basically executes type(value) for every value in column and saves
@@ -213,8 +249,11 @@ class Database:
         self.unlock_table(table_name)
         self._update()
         self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: cast_column "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" COLUMN: "+str(column_name)+" CAST TYPE: "+str(cast_type))
 
     def insert(self, table_name, row, lock_load_save=True):
+        x = datetime.datetime.now()
+        log.Log.save_old_table(self, table_name)
         '''
         Inserts into table
 
@@ -241,9 +280,12 @@ class Database:
             self.unlock_table(table_name)
             self._update()
             self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: insert "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" INSERT ROW: "+str(row))
 
 
     def update(self, table_name, set_value, set_column, condition):
+        x = datetime.datetime.now()
+        log.Log.save_old_table(self,table_name)
         '''
         Update the value of a column where condition is met.
 
@@ -264,8 +306,13 @@ class Database:
         self.unlock_table(table_name)
         self._update()
         self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: update "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" SET COLUMN "+str(set_column))
 
     def delete(self, table_name, condition):
+        x = datetime.datetime.now()
+        if str(table_name)!="meta_length" and str(table_name)!="meta_locks" and str(table_name)!="meta_insert_stack" and str(table_name)!="meta_indexes":
+            log.Log.save_old_table(self,table_name)
+            log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: delete "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name))
         '''
         Delete rows of a table where condition is met.
 
@@ -308,6 +355,7 @@ class Database:
         return_object -> If true, the result will be a table object (usefull for internal usage). Def: False (the result will be printed)
 
         '''
+        x = datetime.datetime.now()
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -329,6 +377,7 @@ class Database:
                 return table
             else:
                 table.show()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: select "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" COLUMNS: "+str(columns))
 
     def show_table(self, table_name, no_of_rows=None):
         '''
@@ -336,10 +385,15 @@ class Database:
 
         table_name -> table's name (needs to exist in database)
         '''
+        x = datetime.datetime.now()
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
         self.tables[table_name].show(no_of_rows, self.is_locked(table_name))
+        if no_of_rows!=None:
+            log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: show_table "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" NUMBER OF ROWS: "+str(no_of_rows))
+        else:
+            log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: show_table "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name))
 
     def sort(self, table_name, column_name, asc=False):
         '''
@@ -349,7 +403,7 @@ class Database:
         column_name -> the column that will be used to sort
         asc -> If True sort will return results using an ascending order. Def: False
         '''
-
+        x = datetime.datetime.now()
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -358,6 +412,7 @@ class Database:
         self.unlock_table(table_name)
         self._update()
         self.save()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: sort "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" COLUMN: "+str(column_name))
 
     def inner_join(self, left_table_name, right_table_name, condition, save_as=None, return_object=False):
         '''
@@ -372,6 +427,7 @@ class Database:
         save_as -> The name that will be used to save the resulting table in the database. Def: None (no save)
         return_object -> If true, the result will be a table object (usefull for internal usage). Def: False (the result will be printed)
         '''
+        x = datetime.datetime.now()
         self.load(self.savedir)
         if self.is_locked(left_table_name) or self.is_locked(right_table_name):
             print(f'Table/Tables are currently locked')
@@ -386,6 +442,7 @@ class Database:
                 return res
             else:
                 res.show()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: inner_join "+"DATABASE: "+str(self._name)+" LEFT TABLE: "+str(left_table_name)+" RIGHT TABLE: "+str(right_table_name))
 
     def lockX_table(self, table_name):
         '''
@@ -516,6 +573,7 @@ class Database:
         table_name -> table's name (needs to exist in database)
         index_name -> name of the created index
         '''
+        x = datetime.datetime.now()
         if self.tables[table_name].pk_idx is None: # if no primary key, no index
             print('## ERROR - Cant create index. Table has no primary key.')
             return
@@ -531,6 +589,7 @@ class Database:
         else:
             print('## ERROR - Cant create index. Another index with the same name already exists.')
             return
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: create_index "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name)+" INDEX NAME: "+str(index_name))
 
     def _construct_index(self, table_name, index_name):
         '''
@@ -544,8 +603,7 @@ class Database:
         # for each record in the primary key of the table, insert its value and index to the btree
         for idx, key in enumerate(self.tables[table_name].columns[self.tables[table_name].pk_idx]):
             bt.insert(key, idx)
-        # save the btree
-        self._save_index(index_name, bt)
+        # save the btreef        self._save_index(index_name, bt)
 
 
     def _has_index(self, table_name):
@@ -554,6 +612,8 @@ class Database:
 
         table_name -> table's name (needs to exist in database)
         '''
+        x = datetime.datetime.now()
+        log.Log.analyt_log("TIMESTAMP: "+str(x)+" FUNCTION: has_index "+"DATABASE: "+str(self._name)+" TABLE: "+str(table_name))
         return table_name in self.tables['meta_indexes'].table_name
 
     def _save_index(self, index_name, index):
